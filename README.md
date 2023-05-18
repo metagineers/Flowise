@@ -1,33 +1,12 @@
 <!-- markdownlint-disable MD030 -->
 
-# Flowise - LangchainJS UI
+# AGICrypto - AI Crypto LangchainJS Based TaskFlow Builder
 
-<a href="https://github.com/FlowiseAI/Flowise">
-<img width="100%" src="https://github.com/FlowiseAI/Flowise/blob/main/images/flowise.gif?raw=true"></a>
+![AICrypto](https://github.com/metagineers/agicrypto/blob/main/images/agicrypto.gif?raw=true)
 
-Drag & drop UI to build your customized LLM flow using [LangchainJS](https://github.com/hwchase17/langchainjs)
-
-## ⚡Quick Start
-
-1. Install Flowise
-    ```bash
-    npm install -g flowise
-    ```
-2. Start Flowise
-
-    ```bash
-    npx flowise start
-    ```
-
-3. Open [http://localhost:3000](http://localhost:3000)
-
-## 🐳 Docker
-
-1. Go to `docker` folder at the root of the project
-2. Create `.env` file and specify the `PORT` (refer to `.env.example`)
-3. `docker-compose up -d`
-4. Open [http://localhost:3000](http://localhost:3000)
-5. You can bring the containers down by `docker-compose stop`
+Drag & drop AI Crytpo TaskFlow builder using framework: 
+* Building applications with LLMs through composability [LangchainJS](https://github.com/hwchase17/langchainjs)
+* AI Flow Builder derived and inspired by [Flowise](https://github.com/FlowiseAI/Flowise)
 
 ## 👨‍💻 Developers
 
@@ -84,7 +63,7 @@ Flowise has 3 different modules in a single mono repository.
     yarn dev
     ```
 
-    Any code changes will reload the app automatically on [http://localhost:8080](http://localhost:8080)
+    Any code changes will reload the app automatically on [http://localhost:3000](http://localhost:3000)
 
 ## 🔒 Authentication
 
@@ -94,6 +73,12 @@ To enable app level authentication, add `USERNAME` and `PASSWORD` to the `.env` 
 USERNAME=user
 PASSWORD=1234
 ```
+
+## 🐳 Docker (Work In Progress - For Future Deployment)
+
+The docker build flow is still in progress to refactor the one done in the orignal Flowise project.
+
+Coming soon
 
 ## 📖 Documentation
 
@@ -109,11 +94,11 @@ Coming soon
 
 ## 🙋 Support
 
-Feel free to ask any questions, raise problems, and request new features in [discussion](https://github.com/FlowiseAI/Flowise/discussions)
+Feel free to ask any questions, raise problems, and request new features in [discussion](https://github.com/metagineers/agicrypto/discussions)
 
 ## 🙌 Contributing
 
-See [contributing guide](CONTRIBUTING.md). Reach out to us at [Discord](https://discord.gg/jbaHfsRVBW) if you have any questions or issues.
+See [contributing guide](CONTRIBUTING.md). Reach out to us at [Discord](https://discord.gg/UyuVDqjkDy) if you have any questions or issues.
 
 ## 📄 License
 

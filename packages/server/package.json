@@ -1,7 +1,7 @@
 {
-    "name": "flowise",
+    "name": "agicrypto",
     "version": "1.2.6",
-    "description": "Flowiseai Server",
+    "description": "Metagineers Server",
     "main": "dist/index",
     "types": "dist/index.d.ts",
     "bin": {
@@ -36,10 +36,10 @@
         "version": "oclif readme && git add README.md"
     },
     "keywords": [],
-    "homepage": "https://flowiseai.com",
+    "homepage": "https://metagineers.com",
     "author": {
-        "name": "Henry Heng",
-        "email": "henryheng@flowiseai.com"
+        "name": "Gold Zulu",
+        "email": "info@metagineers.com"
     },
     "engines": {
         "node": ">=18.15.0"

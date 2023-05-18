@@ -1,13 +1,13 @@
 version: '3.1'
 
 services:
-    flowise:
-        image: flowiseai/flowise
+    agicrypto:
+        image: metagineers/agicrypto
         restart: always
         environment:
             - PORT=${PORT}
         ports:
             - '${PORT}:${PORT}'
         volumes:
-            - ~/.flowise:/root/.flowise
+            - ~/.agicrypto:/root/.agicrypto
         command: /bin/sh -c "sleep 3; flowise start"

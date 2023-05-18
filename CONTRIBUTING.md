@@ -1,28 +1,28 @@
 <!-- markdownlint-disable MD030 -->
 
-# Contributing to Flowise
+# Contributing to AICrypto
 
 We appreciate any form of contributions.
 
 ## ⭐ Star
 
-Star and share the [Github Repo](https://github.com/FlowiseAI/Flowise).
+Star and share the [Github Repo](https://github.com/metagineers/agicrypto).
 
 ## 🙋 Q&A
 
-Search up for any questions in [Q&A section](https://github.com/FlowiseAI/Flowise/discussions/categories/q-a), if you can't find one, don't hesitate to create one. It might helps others that have similar question.
+Search up for any questions in [Q&A section](https://github.com/metagineers/agicrypto/discussions/categories/q-a), if you can't find one, don't hesitate to create one. It might helps others that have similar question.
 
-## 🙌 Share Chatflow
+## 🙌 Share Taskflow
 
-Yes! Sharing how you use Flowise is a way of contribution. Export your chatflow as JSON, attach a screenshot and share it in [Show and Tell section](https://github.com/FlowiseAI/Flowise/discussions/categories/show-and-tell).
+Yes! Sharing how you use Agicrypto is a way of contribution. Export your taskflow as JSON, attach a screenshot and share it in [Show and Tell section](https://github.com/FlowiseAI/Flowise/discussions/categories/show-and-tell).
 
 ## 💡 Ideas
 
-Ideas are welcome such as new feature, apps integration, and blockchain networks. Submit in [Ideas section](https://github.com/FlowiseAI/Flowise/discussions/categories/ideas).
+Ideas are welcome such as new feature, apps integration, and blockchain networks. Submit in [Ideas section](https://github.com/metagineers/agicrypto/discussions/categories/ideas).
 
 ## 🐞 Report Bugs
 
-Found an issue? [Report it](https://github.com/FlowiseAI/Flowise/issues/new/choose).
+Found an issue? [Report it](https://github.com/metagineers/agicrypto/issues/new).
 
 ## 👨‍💻 Contribute to Code
 
@@ -30,11 +30,13 @@ Not sure what to contribute? Some ideas:
 
 -   Create new components from Langchain
 -   Update existing components such as extending functionality, fixing bugs
--   Add new chatflow ideas
+-   Add new taskflow ideas
+
+You can also possibly contribute to the originating efforts by the Langchain and FlowWiseAI team for which inspired this project.
 
 ### Developers
 
-Flowise has 3 different modules in a single mono repository.
+AICrypto has 3 different modules in a single mono repository.
 
 -   `server`: Node backend to serve API logics
 -   `ui`: React frontend
@@ -49,11 +51,13 @@ Flowise has 3 different modules in a single mono repository.
 
 #### Step by step
 
-1. Fork the official [Flowise Github Repository](https://github.com/FlowiseAI/Flowise).
+1. Fork the official [AGICrypto Github Repository](https://github.com/metagineers/agicrypto).
 
 2. Clone your forked repository.
 
-3. Create a new branch, see [guide](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-and-deleting-branches-within-your-repository). Naming conventions:
+3. Create a new branch, see [guide](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-and-deleting-branches-within-your-repository). 
+
+Naming conventions:
 
     - For feature branch: `feature/<Your New Feature>`
     - For bug fix branch: `bugfix/<Your New Bugfix>`.
@@ -108,7 +112,7 @@ Flowise has 3 different modules in a single mono repository.
 
     to make sure everything works fine in production.
 
-11. Commit code and submit Pull Request from forked branch pointing to [Flowise master](https://github.com/FlowiseAI/Flowise/tree/master).
+11. Commit code and submit Pull Request from forked branch pointing to [Flowise master](https://github.com/metagineers/agicrypto/tree/main).
 
 ## 📖 Contribute to Docs
 
@@ -116,12 +120,12 @@ In-Progress
 
 ## 🏷️ Pull Request process
 
-A member of the FlowiseAI team will automatically be notified/assigned when you open a pull request. You can also reach out to us on [Discord](https://discord.gg/jbaHfsRVBW).
+A member of the Metagineers team will automatically be notified/assigned when you open a pull request. You can also reach out to us on [Discord](https://discord.gg/UyuVDqjkDy).
 
 ## 📃 Contributor License Agreement
 
-Before we can merge your contribution you have to sign our [Contributor License Agreement (CLA)](https://cla-assistant.io/FlowiseAI/Flowise). The CLA contains the terms and conditions under which the contribution is submitted. You need to do this only once for your first pull request. Keep in mind that without a signed CLA we cannot merge your contribution.
+Before we can merge your contribution you have to sign our [Contributor License Agreement (CLA)](https://cla-assistant.io/metagineers/agicrypto). The CLA contains the terms and conditions under which the contribution is submitted. You need to do this only once for your first pull request. Keep in mind that without a signed CLA we cannot merge your contribution.
 
 ## 📜 Code of Conduct
 
-This project and everyone participating in it are governed by the Code of Conduct which can be found in the [file](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to hello@flowiseai.com.
+This project and everyone participating in it are governed by the Code of Conduct which can be found in the [file](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to info@metagineers.com.

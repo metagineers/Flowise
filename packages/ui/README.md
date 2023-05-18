@@ -1,17 +1,17 @@
 <!-- markdownlint-disable MD030 -->
 
-# Flowise UI
+# AGICrypto UI
 
-React frontend ui for Flowise.
+React frontend ui for AgiCrypto.
 
-![Flowise](https://github.com/FlowiseAI/Flowise/blob/main/images/flowise.gif?raw=true)
+![AgiCrypto](https://github.com/metagineers/agicrypto/blob/main/images/agicrypto.gif?raw=true)
 
-Install:
+Install (WIP - coming soon for npm packages)
 
 ```bash
-npm i flowise-ui
+npm i agicrypto-ui
 ```
 
 ## License
 
-Source code in this repository is made available under the [MIT License](https://github.com/FlowiseAI/Flowise/blob/master/LICENSE.md).
+Source code in this repository is made available under the [MIT License](https://github.com/metagineers/agicrypto/blob/master/LICENSE.md).
