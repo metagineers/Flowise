@@ -3,14 +3,131 @@ import { load } from 'cheerio'
 import * as fs from 'fs'
 import * as path from 'path'
 import { JSDOM } from 'jsdom'
+import { z } from 'zod'
 import { DataSource } from 'typeorm'
-import { ICommonObject, IDatabaseEntity, IMessage, INodeData } from './Interface'
+import { ICommonObject, IDatabaseEntity, IDocument, IMessage, INodeData, IVariable, MessageContentImageUrl } from './Interface'
 import { AES, enc } from 'crypto-js'
-import { ChatMessageHistory } from 'langchain/memory'
-import { AIMessage, HumanMessage } from 'langchain/schema'
+import { omit } from 'lodash'
+import { AIMessage, HumanMessage, BaseMessage } from '@langchain/core/messages'
+import { Document } from '@langchain/core/documents'
+import { getFileFromStorage } from './storageUtils'
+import { GetSecretValueCommand, SecretsManagerClient, SecretsManagerClientConfig } from '@aws-sdk/client-secrets-manager'
+import { customGet } from '../nodes/sequentialagents/commonUtils'
+import { TextSplitter } from 'langchain/text_splitter'
+import { DocumentLoader } from 'langchain/document_loaders/base'
 
 export const numberOrExpressionRegex = '^(\\d+\\.?\\d*|{{.*}})$' //return true if string consists only numbers OR expression {{}}
 export const notEmptyRegex = '(.|\\s)*\\S(.|\\s)*' //return true if string is not empty or blank
+export const FLOWISE_CHATID = 'flowise_chatId'
+
+let secretsManagerClient: SecretsManagerClient | null = null
+const USE_AWS_SECRETS_MANAGER = process.env.SECRETKEY_STORAGE_TYPE === 'aws'
+if (USE_AWS_SECRETS_MANAGER) {
+    const region = process.env.SECRETKEY_AWS_REGION || 'us-east-1' // Default region if not provided
+    const accessKeyId = process.env.SECRETKEY_AWS_ACCESS_KEY
+    const secretAccessKey = process.env.SECRETKEY_AWS_SECRET_KEY
+
+    let credentials: SecretsManagerClientConfig['credentials'] | undefined
+    if (accessKeyId && secretAccessKey) {
+        credentials = {
+            accessKeyId,
+            secretAccessKey
+        }
+    }
+    secretsManagerClient = new SecretsManagerClient({ credentials, region })
+}
+
+/*
+ * List of dependencies allowed to be import in @flowiseai/nodevm
+ */
+export const availableDependencies = [
+    '@aws-sdk/client-bedrock-runtime',
+    '@aws-sdk/client-dynamodb',
+    '@aws-sdk/client-s3',
+    '@elastic/elasticsearch',
+    '@dqbd/tiktoken',
+    '@getzep/zep-js',
+    '@gomomento/sdk',
+    '@gomomento/sdk-core',
+    '@google-ai/generativelanguage',
+    '@google/generative-ai',
+    '@huggingface/inference',
+    '@langchain/anthropic',
+    '@langchain/aws',
+    '@langchain/cohere',
+    '@langchain/community',
+    '@langchain/core',
+    '@langchain/google-genai',
+    '@langchain/google-vertexai',
+    '@langchain/groq',
+    '@langchain/langgraph',
+    '@langchain/mistralai',
+    '@langchain/mongodb',
+    '@langchain/ollama',
+    '@langchain/openai',
+    '@langchain/pinecone',
+    '@langchain/qdrant',
+    '@langchain/weaviate',
+    '@notionhq/client',
+    '@opensearch-project/opensearch',
+    '@pinecone-database/pinecone',
+    '@qdrant/js-client-rest',
+    '@supabase/supabase-js',
+    '@upstash/redis',
+    '@zilliz/milvus2-sdk-node',
+    'apify-client',
+    'axios',
+    'cheerio',
+    'chromadb',
+    'cohere-ai',
+    'd3-dsv',
+    'faiss-node',
+    'form-data',
+    'google-auth-library',
+    'graphql',
+    'html-to-text',
+    'ioredis',
+    'langchain',
+    'langfuse',
+    'langsmith',
+    'langwatch',
+    'linkifyjs',
+    'lunary',
+    'mammoth',
+    'moment',
+    'mongodb',
+    'mysql2',
+    'node-fetch',
+    'node-html-markdown',
+    'notion-to-md',
+    'openai',
+    'pdf-parse',
+    'pdfjs-dist',
+    'pg',
+    'playwright',
+    'puppeteer',
+    'redis',
+    'replicate',
+    'srt-parser-2',
+    'typeorm',
+    'weaviate-ts-client'
+]
+
+export const defaultAllowBuiltInDep = [
+    'assert',
+    'buffer',
+    'crypto',
+    'events',
+    'http',
+    'https',
+    'net',
+    'path',
+    'querystring',
+    'timers',
+    'tls',
+    'url',
+    'zlib'
+]
 
 /**
  * Get base classes of components
@@ -132,31 +249,59 @@ export const getNodeModulesPackagePath = (packageName: string): string => {
  * @returns {boolean}
  */
 export const getInputVariables = (paramValue: string): string[] => {
-    let returnVal = paramValue
+    if (typeof paramValue !== 'string') return []
+    const returnVal = paramValue
     const variableStack = []
     const inputVariables = []
     let startIdx = 0
     const endIdx = returnVal.length
-
     while (startIdx < endIdx) {
         const substr = returnVal.substring(startIdx, startIdx + 1)
-
+        // Check for escaped curly brackets
+        if (substr === '\\' && (returnVal[startIdx + 1] === '{' || returnVal[startIdx + 1] === '}')) {
+            startIdx += 2 // Skip the escaped bracket
+            continue
+        }
         // Store the opening double curly bracket
         if (substr === '{') {
             variableStack.push({ substr, startIdx: startIdx + 1 })
         }
-
         // Found the complete variable
         if (substr === '}' && variableStack.length > 0 && variableStack[variableStack.length - 1].substr === '{') {
             const variableStartIdx = variableStack[variableStack.length - 1].startIdx
             const variableEndIdx = startIdx
             const variableFullPath = returnVal.substring(variableStartIdx, variableEndIdx)
-            inputVariables.push(variableFullPath)
+            if (!variableFullPath.includes(':')) inputVariables.push(variableFullPath)
             variableStack.pop()
         }
         startIdx += 1
     }
     return inputVariables
+}
+
+/**
+ * Transform curly braces into double curly braces if the content includes a colon.
+ * @param input - The original string that may contain { ... } segments.
+ * @returns The transformed string, where { ... } containing a colon has been replaced with {{ ... }}.
+ */
+export const transformBracesWithColon = (input: string): string => {
+    // This regex will match anything of the form `{ ... }` (no nested braces).
+    // `[^{}]*` means: match any characters that are not `{` or `}` zero or more times.
+    const regex = /\{([^{}]*?)\}/g
+
+    return input.replace(regex, (match, groupContent) => {
+        // groupContent is the text inside the braces `{ ... }`.
+
+        if (groupContent.includes(':')) {
+            // If there's a colon in the content, we turn { ... } into {{ ... }}
+            // The match is the full string like: "{ answer: hello }"
+            // groupContent is the inner part like: " answer: hello "
+            return `{{${groupContent}}}`
+        } else {
+            // Otherwise, leave it as is
+            return match
+        }
+    })
 }
 
 /**
@@ -215,22 +360,12 @@ function getURLsFromHTML(htmlBody: string, baseURL: string): string[] {
     const linkElements = dom.window.document.querySelectorAll('a')
     const urls: string[] = []
     for (const linkElement of linkElements) {
-        if (linkElement.href.slice(0, 1) === '/') {
-            try {
-                const urlObj = new URL(baseURL + linkElement.href)
-                urls.push(urlObj.href) //relative
-            } catch (err) {
-                if (process.env.DEBUG === 'true') console.error(`error with relative url: ${err.message}`)
-                continue
-            }
-        } else {
-            try {
-                const urlObj = new URL(linkElement.href)
-                urls.push(urlObj.href) //absolute
-            } catch (err) {
-                if (process.env.DEBUG === 'true') console.error(`error with absolute url: ${err.message}`)
-                continue
-            }
+        try {
+            const urlObj = new URL(linkElement.href, baseURL)
+            urls.push(urlObj.href)
+        } catch (err) {
+            if (process.env.DEBUG === 'true') console.error(`error with scraped URL: ${err.message}`)
+            continue
         }
     }
     return urls
@@ -243,7 +378,8 @@ function getURLsFromHTML(htmlBody: string, baseURL: string): string[] {
  */
 function normalizeURL(urlString: string): string {
     const urlObj = new URL(urlString)
-    const hostPath = urlObj.hostname + urlObj.pathname
+    const port = urlObj.port ? `:${urlObj.port}` : ''
+    const hostPath = urlObj.hostname + port + urlObj.pathname + urlObj.search
     if (hostPath.length > 0 && hostPath.slice(-1) == '/') {
         // handling trailing slash
         return hostPath.slice(0, -1)
@@ -290,7 +426,7 @@ async function crawl(baseURL: string, currentURL: string, pages: string[], limit
         }
 
         const htmlBody = await resp.text()
-        const nextURLs = getURLsFromHTML(htmlBody, baseURL)
+        const nextURLs = getURLsFromHTML(htmlBody, currentURL)
         for (const nextURL of nextURLs) {
             pages = await crawl(baseURL, nextURL, pages, limit)
         }
@@ -301,7 +437,7 @@ async function crawl(baseURL: string, currentURL: string, pages: string[], limit
 }
 
 /**
- * Prep URL before passing into recursive carwl function
+ * Prep URL before passing into recursive crawl function
  * @param {string} stringURL
  * @param {number} limit
  * @returns {Promise<string[]>}
@@ -377,7 +513,8 @@ const getEncryptionKeyFilePath = (): string => {
         path.join(__dirname, '..', '..', '..', '..', 'encryption.key'),
         path.join(__dirname, '..', '..', '..', '..', 'server', 'encryption.key'),
         path.join(__dirname, '..', '..', '..', '..', '..', 'encryption.key'),
-        path.join(__dirname, '..', '..', '..', '..', '..', 'server', 'encryption.key')
+        path.join(__dirname, '..', '..', '..', '..', '..', 'server', 'encryption.key'),
+        path.join(getUserHome(), '.flowise', 'encryption.key')
     ]
     for (const checkPath of checkPaths) {
         if (fs.existsSync(checkPath)) {
@@ -387,7 +524,7 @@ const getEncryptionKeyFilePath = (): string => {
     return ''
 }
 
-const getEncryptionKeyPath = (): string => {
+export const getEncryptionKeyPath = (): string => {
     return process.env.SECRETKEY_PATH ? path.join(process.env.SECRETKEY_PATH, 'encryption.key') : getEncryptionKeyFilePath()
 }
 
@@ -396,6 +533,9 @@ const getEncryptionKeyPath = (): string => {
  * @returns {Promise<string>}
  */
 const getEncryptionKey = async (): Promise<string> => {
+    if (process.env.FLOWISE_SECRETKEY_OVERWRITE !== undefined && process.env.FLOWISE_SECRETKEY_OVERWRITE !== '') {
+        return process.env.FLOWISE_SECRETKEY_OVERWRITE
+    }
     try {
         return await fs.promises.readFile(getEncryptionKeyPath(), 'utf8')
     } catch (error) {
@@ -411,10 +551,33 @@ const getEncryptionKey = async (): Promise<string> => {
  * @returns {Promise<ICommonObject>}
  */
 const decryptCredentialData = async (encryptedData: string): Promise<ICommonObject> => {
-    const encryptKey = await getEncryptionKey()
-    const decryptedData = AES.decrypt(encryptedData, encryptKey)
+    let decryptedDataStr: string
+
+    if (USE_AWS_SECRETS_MANAGER && secretsManagerClient) {
+        try {
+            const command = new GetSecretValueCommand({ SecretId: encryptedData })
+            const response = await secretsManagerClient.send(command)
+
+            if (response.SecretString) {
+                const secretObj = JSON.parse(response.SecretString)
+                decryptedDataStr = JSON.stringify(secretObj)
+            } else {
+                throw new Error('Failed to retrieve secret value.')
+            }
+        } catch (error) {
+            console.error(error)
+            throw new Error('Credentials could not be decrypted.')
+        }
+    } else {
+        // Fallback to existing code
+        const encryptKey = await getEncryptionKey()
+        const decryptedData = AES.decrypt(encryptedData, encryptKey)
+        decryptedDataStr = decryptedData.toString(enc.Utf8)
+    }
+
+    if (!decryptedDataStr) return {}
     try {
-        return JSON.parse(decryptedData.toString(enc.Utf8))
+        return JSON.parse(decryptedDataStr)
     } catch (e) {
         console.error(e)
         throw new Error('Credentials could not be decrypted.')
@@ -432,13 +595,17 @@ export const getCredentialData = async (selectedCredentialId: string, options: I
     const databaseEntities = options.databaseEntities as IDatabaseEntity
 
     try {
+        if (!selectedCredentialId) {
+            return {}
+        }
+
         const credential = await appDataSource.getRepository(databaseEntities['Credential']).findOneBy({
             id: selectedCredentialId
         })
 
         if (!credential) return {}
 
-        // Decrpyt credentialData
+        // Decrypt credentialData
         const decryptedCredentialData = await decryptCredentialData(credential.encryptedData)
 
         return decryptedCredentialData
@@ -447,8 +614,19 @@ export const getCredentialData = async (selectedCredentialId: string, options: I
     }
 }
 
-export const getCredentialParam = (paramName: string, credentialData: ICommonObject, nodeData: INodeData): any => {
-    return (nodeData.inputs as ICommonObject)[paramName] ?? credentialData[paramName] ?? undefined
+/**
+ * Get first non falsy value
+ *
+ * @param {...any} values
+ *
+ * @returns {any|undefined}
+ */
+export const defaultChain = (...values: any[]): any | undefined => {
+    return values.filter(Boolean)[0]
+}
+
+export const getCredentialParam = (paramName: string, credentialData: ICommonObject, nodeData: INodeData, defaultValue?: any): any => {
+    return (nodeData.inputs as ICommonObject)[paramName] ?? credentialData[paramName] ?? defaultValue ?? undefined
 }
 
 // reference https://www.freeformatter.com/json-escape.html
@@ -503,22 +681,84 @@ export const getUserHome = (): string => {
 }
 
 /**
- * Map incoming chat history to ChatMessageHistory
- * @param {options} ICommonObject
- * @returns {ChatMessageHistory}
+ * Map ChatMessage to BaseMessage
+ * @param {IChatMessage[]} chatmessages
+ * @returns {BaseMessage[]}
  */
-export const mapChatHistory = (options: ICommonObject): ChatMessageHistory => {
+export const mapChatMessageToBaseMessage = async (chatmessages: any[] = []): Promise<BaseMessage[]> => {
     const chatHistory = []
-    const histories: IMessage[] = options.chatHistory ?? []
 
-    for (const message of histories) {
-        if (message.type === 'apiMessage') {
-            chatHistory.push(new AIMessage(message.message))
-        } else if (message.type === 'userMessage') {
-            chatHistory.push(new HumanMessage(message.message))
+    for (const message of chatmessages) {
+        if (message.role === 'apiMessage' || message.type === 'apiMessage') {
+            chatHistory.push(new AIMessage(message.content || ''))
+        } else if (message.role === 'userMessage' || message.role === 'userMessage') {
+            // check for image/files uploads
+            if (message.fileUploads) {
+                // example: [{"type":"stored-file","name":"0_DiXc4ZklSTo3M8J4.jpg","mime":"image/jpeg"}]
+                try {
+                    let messageWithFileUploads = ''
+                    const uploads = JSON.parse(message.fileUploads)
+                    const imageContents: MessageContentImageUrl[] = []
+                    for (const upload of uploads) {
+                        if (upload.type === 'stored-file' && upload.mime.startsWith('image')) {
+                            const fileData = await getFileFromStorage(upload.name, message.chatflowid, message.chatId)
+                            // as the image is stored in the server, read the file and convert it to base64
+                            const bf = 'data:' + upload.mime + ';base64,' + fileData.toString('base64')
+
+                            imageContents.push({
+                                type: 'image_url',
+                                image_url: {
+                                    url: bf
+                                }
+                            })
+                        } else if (upload.type === 'url' && upload.mime.startsWith('image')) {
+                            imageContents.push({
+                                type: 'image_url',
+                                image_url: {
+                                    url: upload.data
+                                }
+                            })
+                        } else if (upload.type === 'stored-file:full') {
+                            const fileLoaderNodeModule = await import('../nodes/documentloaders/File/File')
+                            // @ts-ignore
+                            const fileLoaderNodeInstance = new fileLoaderNodeModule.nodeClass()
+                            const options = {
+                                retrieveAttachmentChatId: true,
+                                chatflowid: message.chatflowid,
+                                chatId: message.chatId
+                            }
+                            const nodeData = {
+                                inputs: {
+                                    txtFile: `FILE-STORAGE::${JSON.stringify([upload.name])}`
+                                }
+                            }
+                            const documents: IDocument[] = await fileLoaderNodeInstance.init(nodeData, '', options)
+                            const pageContents = documents.map((doc) => doc.pageContent).join('\n')
+                            messageWithFileUploads += `<doc name='${upload.name}'>${pageContents}</doc>\n\n`
+                        }
+                    }
+                    const messageContent = messageWithFileUploads ? `${messageWithFileUploads}\n\n${message.content}` : message.content
+                    chatHistory.push(
+                        new HumanMessage({
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: messageContent
+                                },
+                                ...imageContents
+                            ]
+                        })
+                    )
+                } catch (e) {
+                    // failed to parse fileUploads, continue with text only
+                    chatHistory.push(new HumanMessage(message.content || ''))
+                }
+            } else {
+                chatHistory.push(new HumanMessage(message.content || ''))
+            }
         }
     }
-    return new ChatMessageHistory(chatHistory)
+    return chatHistory
 }
 
 /**
@@ -526,7 +766,7 @@ export const mapChatHistory = (options: ICommonObject): ChatMessageHistory => {
  * @param {IMessage[]} chatHistory
  * @returns {string}
  */
-export const convertChatHistoryToText = (chatHistory: IMessage[]): string => {
+export const convertChatHistoryToText = (chatHistory: IMessage[] = []): string => {
     return chatHistory
         .map((chatMessage) => {
             if (chatMessage.type === 'apiMessage') {
@@ -538,4 +778,397 @@ export const convertChatHistoryToText = (chatHistory: IMessage[]): string => {
             }
         })
         .join('\n')
+}
+
+/**
+ * Serialize array chat history to string
+ * @param {string | Array<string>} chatHistory
+ * @returns {string}
+ */
+export const serializeChatHistory = (chatHistory: string | Array<string>) => {
+    if (Array.isArray(chatHistory)) {
+        return chatHistory.join('\n')
+    }
+    return chatHistory
+}
+
+/**
+ * Convert schema to zod schema
+ * @param {string | object} schema
+ * @returns {ICommonObject}
+ */
+export const convertSchemaToZod = (schema: string | object): ICommonObject => {
+    try {
+        const parsedSchema = typeof schema === 'string' ? JSON.parse(schema) : schema
+        const zodObj: ICommonObject = {}
+        for (const sch of parsedSchema) {
+            if (sch.type === 'string') {
+                if (sch.required) {
+                    zodObj[sch.property] = z.string({ required_error: `${sch.property} required` }).describe(sch.description)
+                } else {
+                    zodObj[sch.property] = z.string().describe(sch.description).optional()
+                }
+            } else if (sch.type === 'number') {
+                if (sch.required) {
+                    zodObj[sch.property] = z.number({ required_error: `${sch.property} required` }).describe(sch.description)
+                } else {
+                    zodObj[sch.property] = z.number().describe(sch.description).optional()
+                }
+            } else if (sch.type === 'boolean') {
+                if (sch.required) {
+                    zodObj[sch.property] = z.boolean({ required_error: `${sch.property} required` }).describe(sch.description)
+                } else {
+                    zodObj[sch.property] = z.boolean().describe(sch.description).optional()
+                }
+            }
+        }
+        return zodObj
+    } catch (e) {
+        throw new Error(e)
+    }
+}
+
+/**
+ * Flatten nested object
+ * @param {ICommonObject} obj
+ * @param {string} parentKey
+ * @returns {ICommonObject}
+ */
+export const flattenObject = (obj: ICommonObject, parentKey?: string) => {
+    let result: any = {}
+
+    if (!obj) return result
+
+    Object.keys(obj).forEach((key) => {
+        const value = obj[key]
+        const _key = parentKey ? parentKey + '.' + key : key
+        if (typeof value === 'object') {
+            result = { ...result, ...flattenObject(value, _key) }
+        } else {
+            result[_key] = value
+        }
+    })
+
+    return result
+}
+
+/**
+ * Convert BaseMessage to IMessage
+ * @param {BaseMessage[]} messages
+ * @returns {IMessage[]}
+ */
+export const convertBaseMessagetoIMessage = (messages: BaseMessage[]): IMessage[] => {
+    const formatmessages: IMessage[] = []
+    for (const m of messages) {
+        if (m._getType() === 'human') {
+            formatmessages.push({
+                message: m.content as string,
+                type: 'userMessage'
+            })
+        } else if (m._getType() === 'ai') {
+            formatmessages.push({
+                message: m.content as string,
+                type: 'apiMessage'
+            })
+        } else if (m._getType() === 'system') {
+            formatmessages.push({
+                message: m.content as string,
+                type: 'apiMessage'
+            })
+        }
+    }
+    return formatmessages
+}
+
+/**
+ * Convert MultiOptions String to String Array
+ * @param {string} inputString
+ * @returns {string[]}
+ */
+export const convertMultiOptionsToStringArray = (inputString: string): string[] => {
+    let ArrayString: string[] = []
+    try {
+        ArrayString = JSON.parse(inputString)
+    } catch (e) {
+        ArrayString = []
+    }
+    return ArrayString
+}
+
+/**
+ * Get variables
+ * @param {DataSource} appDataSource
+ * @param {IDatabaseEntity} databaseEntities
+ * @param {INodeData} nodeData
+ */
+export const getVars = async (appDataSource: DataSource, databaseEntities: IDatabaseEntity, nodeData: INodeData) => {
+    const variables = ((await appDataSource.getRepository(databaseEntities['Variable']).find()) as IVariable[]) ?? []
+
+    // override variables defined in overrideConfig
+    // nodeData.inputs.vars is an Object, check each property and override the variable
+    if (nodeData?.inputs?.vars) {
+        for (const propertyName of Object.getOwnPropertyNames(nodeData.inputs.vars)) {
+            const foundVar = variables.find((v) => v.name === propertyName)
+            if (foundVar) {
+                // even if the variable was defined as runtime, we override it with static value
+                foundVar.type = 'static'
+                foundVar.value = nodeData.inputs.vars[propertyName]
+            } else {
+                // add it the variables, if not found locally in the db
+                variables.push({ name: propertyName, type: 'static', value: nodeData.inputs.vars[propertyName] })
+            }
+        }
+    }
+
+    return variables
+}
+
+/**
+ * Prepare sandbox variables
+ * @param {IVariable[]} variables
+ */
+export const prepareSandboxVars = (variables: IVariable[]) => {
+    let vars = {}
+    if (variables) {
+        for (const item of variables) {
+            let value = item.value
+
+            // read from .env file
+            if (item.type === 'runtime') {
+                value = process.env[item.name] ?? ''
+            }
+
+            Object.defineProperty(vars, item.name, {
+                enumerable: true,
+                configurable: true,
+                writable: true,
+                value: value
+            })
+        }
+    }
+    return vars
+}
+
+let version: string
+export const getVersion: () => Promise<{ version: string }> = async () => {
+    if (version != null) return { version }
+
+    const checkPaths = [
+        path.join(__dirname, '..', 'package.json'),
+        path.join(__dirname, '..', '..', 'package.json'),
+        path.join(__dirname, '..', '..', '..', 'package.json'),
+        path.join(__dirname, '..', '..', '..', '..', 'package.json'),
+        path.join(__dirname, '..', '..', '..', '..', '..', 'package.json')
+    ]
+    for (const checkPath of checkPaths) {
+        try {
+            const content = await fs.promises.readFile(checkPath, 'utf8')
+            const parsedContent = JSON.parse(content)
+            version = parsedContent.version
+            return { version }
+        } catch {
+            continue
+        }
+    }
+
+    throw new Error('None of the package.json paths could be parsed')
+}
+
+/**
+ * Map Ext to InputField
+ * @param {string} ext
+ * @returns {string}
+ */
+export const mapExtToInputField = (ext: string) => {
+    switch (ext) {
+        case '.txt':
+            return 'txtFile'
+        case '.pdf':
+            return 'pdfFile'
+        case '.json':
+            return 'jsonFile'
+        case '.csv':
+        case '.xls':
+        case '.xlsx':
+            return 'csvFile'
+        case '.jsonl':
+            return 'jsonlinesFile'
+        case '.docx':
+        case '.doc':
+            return 'docxFile'
+        case '.yaml':
+            return 'yamlFile'
+        default:
+            return 'txtFile'
+    }
+}
+
+/**
+ * Map MimeType to InputField
+ * @param {string} mimeType
+ * @returns {string}
+ */
+export const mapMimeTypeToInputField = (mimeType: string) => {
+    switch (mimeType) {
+        case 'text/plain':
+            return 'txtFile'
+        case 'application/pdf':
+            return 'pdfFile'
+        case 'application/json':
+            return 'jsonFile'
+        case 'text/csv':
+            return 'csvFile'
+        case 'application/json-lines':
+        case 'application/jsonl':
+        case 'text/jsonl':
+            return 'jsonlinesFile'
+        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+            return 'docxFile'
+        case 'application/vnd.yaml':
+        case 'application/x-yaml':
+        case 'text/vnd.yaml':
+        case 'text/x-yaml':
+        case 'text/yaml':
+            return 'yamlFile'
+        default:
+            return 'txtFile'
+    }
+}
+
+/**
+ * Map MimeType to Extension
+ * @param {string} mimeType
+ * @returns {string}
+ */
+export const mapMimeTypeToExt = (mimeType: string) => {
+    switch (mimeType) {
+        case 'text/plain':
+            return 'txt'
+        case 'application/pdf':
+            return 'pdf'
+        case 'application/json':
+            return 'json'
+        case 'text/csv':
+            return 'csv'
+        case 'application/json-lines':
+        case 'application/jsonl':
+        case 'text/jsonl':
+            return 'jsonl'
+        case 'application/msword':
+            return 'doc'
+        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+            return 'docx'
+        case 'application/vnd.ms-excel':
+            return 'xls'
+        case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+            return 'xlsx'
+        default:
+            return ''
+    }
+}
+
+// remove invalid markdown image pattern: ![<some-string>](<some-string>)
+export const removeInvalidImageMarkdown = (output: string): string => {
+    return typeof output === 'string' ? output.replace(/!\[.*?\]\((?!https?:\/\/).*?\)/g, '') : output
+}
+
+/**
+ * Extract output from array
+ * @param {any} output
+ * @returns {string}
+ */
+export const extractOutputFromArray = (output: any): string => {
+    if (Array.isArray(output)) {
+        return output.map((o) => o.text).join('\n')
+    } else if (typeof output === 'object') {
+        if (output.text) return output.text
+        else return JSON.stringify(output)
+    }
+    return output
+}
+
+/**
+ * Loop through the object and replace the key with the value
+ * @param {any} obj
+ * @param {any} sourceObj
+ * @returns {any}
+ */
+export const resolveFlowObjValue = (obj: any, sourceObj: any): any => {
+    if (typeof obj === 'object' && obj !== null) {
+        const resolved: any = Array.isArray(obj) ? [] : {}
+        for (const key in obj) {
+            const value = obj[key]
+            resolved[key] = resolveFlowObjValue(value, sourceObj)
+        }
+        return resolved
+    } else if (typeof obj === 'string' && obj.startsWith('$flow')) {
+        return customGet(sourceObj, obj)
+    } else {
+        return obj
+    }
+}
+
+export const handleDocumentLoaderOutput = (docs: Document[], output: string) => {
+    if (output === 'document') {
+        return docs
+    } else {
+        let finaltext = ''
+        for (const doc of docs) {
+            finaltext += `${doc.pageContent}\n`
+        }
+        return handleEscapeCharacters(finaltext, false)
+    }
+}
+
+export const parseDocumentLoaderMetadata = (metadata: object | string): object => {
+    if (!metadata) return {}
+
+    if (typeof metadata !== 'object') {
+        return JSON.parse(metadata)
+    }
+
+    return metadata
+}
+
+export const handleDocumentLoaderMetadata = (
+    docs: Document[],
+    _omitMetadataKeys: string,
+    metadata: object | string = {},
+    sourceIdKey?: string
+) => {
+    let omitMetadataKeys: string[] = []
+    if (_omitMetadataKeys) {
+        omitMetadataKeys = _omitMetadataKeys.split(',').map((key) => key.trim())
+    }
+
+    metadata = parseDocumentLoaderMetadata(metadata)
+
+    return docs.map((doc) => ({
+        ...doc,
+        metadata:
+            _omitMetadataKeys === '*'
+                ? metadata
+                : omit(
+                      {
+                          ...metadata,
+                          ...doc.metadata,
+                          ...(sourceIdKey ? { [sourceIdKey]: doc.metadata[sourceIdKey] || sourceIdKey } : undefined)
+                      },
+                      omitMetadataKeys
+                  )
+    }))
+}
+
+export const handleDocumentLoaderDocuments = async (loader: DocumentLoader, textSplitter?: TextSplitter) => {
+    let docs: Document[] = []
+
+    if (textSplitter) {
+        let splittedDocs = await loader.load()
+        splittedDocs = await textSplitter.splitDocuments(splittedDocs)
+        docs = splittedDocs
+    } else {
+        docs = await loader.load()
+    }
+
+    return docs
 }
